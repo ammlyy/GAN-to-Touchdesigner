@@ -1,3 +1,11 @@
+# Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 """Generate lerp videos using pretrained network pickle."""
 
 import copy
@@ -12,8 +20,24 @@ import numpy as np
 import scipy.interpolate
 import torch
 from tqdm import tqdm
+import random
 
 import legacy
+
+#----------------------------------------------------------------------------
+import sys
+sys.path.append('Library')
+
+import numpy as np
+import argparse
+import time
+import SpoutSDK
+import pygame
+from pygame.locals import *
+from OpenGL.GL import *
+from OpenGL.GL.framebufferobjects import *
+from OpenGL.GLU import *
+
 
 #----------------------------------------------------------------------------
 
@@ -36,55 +60,115 @@ def layout_grid(img, grid_w=None, grid_h=1, float_to_uint8=True, chw_to_hwc=True
 #----------------------------------------------------------------------------
 
 def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind='cubic', grid_dims=(1,1), num_keyframes=None, wraps=2, psi=1, device=torch.device('cuda'), **video_kwargs):
-    grid_w = grid_dims[0]
-    grid_h = grid_dims[1]
+       # window details
+    width = 256
+    height = 256
+    display = (width,height)
+    
+    senderName = 'GAN out'
+    silent = False
+    
+    # window setup
+    pygame.init() 
+    pygame.display.set_caption(senderName)
+    pygame.display.set_mode(display, DOUBLEBUF|OPENGL)
 
-    if num_keyframes is None:
-        if len(seeds) % (grid_w*grid_h) != 0:
-            raise ValueError('Number of input seeds must be divisible by grid W*H')
-        num_keyframes = len(seeds) // (grid_w*grid_h)
+    # init spout sender
+    spoutSender = SpoutSDK.SpoutSender()
+    spoutSenderWidth = width
+    spoutSenderHeight = height
+    # Its signature in c++ looks like this: bool CreateSender(const char *Sendername, unsigned int width, unsigned int height, DWORD dwFormat = 0);
+    spoutSender.CreateSender(senderName, spoutSenderWidth, spoutSenderHeight, 0)
+    # create textures for spout receiver and spout sender 
+    textureSendID = glGenTextures(1)
+    frame_idx = 0
+    while(True):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                spoutReceiver.ReleaseReceiver()
+                pygame.quit()
+                quit()
 
-    all_seeds = np.zeros(num_keyframes*grid_h*grid_w, dtype=np.int64)
-    for idx in range(num_keyframes*grid_h*grid_w):
-        all_seeds[idx] = seeds[idx % len(seeds)]
+    
+        grid_w = grid_dims[0]
+        grid_h = grid_dims[1]
 
-    if shuffle_seed is not None:
-        rng = np.random.RandomState(seed=shuffle_seed)
-        rng.shuffle(all_seeds)
+        if num_keyframes is None:
+            if len(seeds) % (grid_w*grid_h) != 0:
+                raise ValueError('Number of input seeds must be divisible by grid W*H')
+            num_keyframes = len(seeds) // (grid_w*grid_h)
 
-    zs = torch.from_numpy(np.stack([np.random.RandomState(seed).randn(G.z_dim) for seed in all_seeds])).to(device)
-    ws = G.mapping(z=zs, c=None, truncation_psi=psi)
-    _ = G.synthesis(ws[:1]) # warm up
-    ws = ws.reshape(grid_h, grid_w, num_keyframes, *ws.shape[1:])
+        all_seeds = np.zeros(num_keyframes*grid_h*grid_w, dtype=np.int64)
+        for idx in range(num_keyframes*grid_h*grid_w):
+            all_seeds[idx] = seeds[idx % len(seeds)]
 
-    # Interpolation.
-    grid = []
-    for yi in range(grid_h):
-        row = []
-        for xi in range(grid_w):
-            x = np.arange(-num_keyframes * wraps, num_keyframes * (wraps + 1))
-            y = np.tile(ws[yi][xi].cpu().numpy(), [wraps * 2 + 1, 1, 1])
-            interp = scipy.interpolate.interp1d(x, y, kind=kind, axis=0)
-            row.append(interp)
-        grid.append(row)
+        if shuffle_seed is not None:
+            rng = np.random.RandomState(seed=shuffle_seed)
+            rng.shuffle(all_seeds)
 
-    # Render video.
-    video_out = imageio.get_writer(mp4, mode='I', fps=60, codec='libx264', **video_kwargs)
-    for frame_idx in tqdm(range(num_keyframes * w_frames)):
-        imgs = []
-        for yi in range(grid_h):
-            for xi in range(grid_w):
-                interp = grid[yi][xi]
-                w = torch.from_numpy(interp(frame_idx / w_frames)).to(device)
-                img = G.synthesis(ws=w.unsqueeze(0), noise_mode='const')[0]
-                imgs.append(img)
-        video_out.append_data(layout_grid(torch.stack(imgs), grid_w=grid_w, grid_h=grid_h))
-    video_out.close()
+        zs = torch.from_numpy(np.stack([np.random.RandomState(seed).randn(G.z_dim) for seed in all_seeds])).to(device)
+        ws = G.mapping(z=zs, c=None, truncation_psi=psi)
+        _ = G.synthesis(ws[:1]) # warm up
+        ws = ws.reshape(grid_h, grid_w, num_keyframes, *ws.shape[1:])
+
+
+        # Interpolation.
+        x = np.arange(-num_keyframes * wraps, num_keyframes * (wraps + 1))
+        y = np.tile(ws[0][0].cpu().numpy(), [wraps * 2 + 1, 1, 1])
+        interp = scipy.interpolate.interp1d(x, y, kind=kind, axis=0)
+
+        
+        w = torch.from_numpy(interp(frame_idx / w_frames)).to(device)
+        img = G.synthesis(ws=w.unsqueeze(0), noise_mode='const')
+        img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0).cpu().numpy()
+        frame_idx+=5
+
+    # setup the texture so we can load the output into it
+        glBindTexture(GL_TEXTURE_2D, textureSendID);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        # copy output into texture
+        glTexImage2D( GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, img)
+            
+        # setup window to draw to screen
+        glActiveTexture(GL_TEXTURE0)
+        # clean start
+        glClear(GL_COLOR_BUFFER_BIT  | GL_DEPTH_BUFFER_BIT )
+        # reset drawing perspective
+        glLoadIdentity()
+        # draw texture on screen
+        glBegin(GL_QUADS)
+
+        glTexCoord(0,0)        
+        glVertex2f(0,0)
+
+        glTexCoord(1,0)
+        glVertex2f(width,0)
+
+        glTexCoord(1,1)
+        glVertex2f(width,height)
+
+        glTexCoord(0,1)
+        glVertex2f(0,height)
+
+        glEnd()
+        
+        if silent:
+            pygame.display.iconify()
+                
+        # update window
+        pygame.display.flip()        
+
+        spoutSender.SendTexture(textureSendID.item(), GL_TEXTURE_2D, spoutSenderWidth, spoutSenderHeight, False, 0)
 
 #----------------------------------------------------------------------------
 
+
 def parse_range(s: Union[str, List[int]]) -> List[int]:
     '''Parse a comma separated list of numbers or ranges and return a list of ints.
+
     Example: '1,2,5-10' returns [1, 2, 5, 6, 7]
     '''
     if isinstance(s, list): return s
@@ -102,6 +186,7 @@ def parse_range(s: Union[str, List[int]]) -> List[int]:
 
 def parse_tuple(s: Union[str, Tuple[int,int]]) -> Tuple[int, int]:
     '''Parse a 'M,N' or 'MxN' integer tuple.
+
     Example:
         '4x2' returns (4,2)
         '0,1' returns (0,1)
@@ -117,7 +202,7 @@ def parse_tuple(s: Union[str, Tuple[int,int]]) -> Tuple[int, int]:
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
 @click.option('--seeds', type=parse_range, help='List of random seeds', required=True)
-@click.option('--shuffle-seed', type=int, help='Random seed to use for shuffling seed order', default=42)
+@click.option('--shuffle-seed', type=int, help='Random seed to use for shuffling seed order', default=None)
 @click.option('--grid', type=parse_tuple, help='Grid width/height, e.g. \'4x3\' (default: 1x1)', default=(1,1))
 @click.option('--num-keyframes', type=int, help='Number of seeds to interpolate through.  If not specified, determine based on the length of the seeds array given by --seeds.', default=None)
 @click.option('--w-frames', type=int, help='Number of frames to interpolate between latents', default=120)
@@ -134,16 +219,22 @@ def generate_images(
     output: str
 ):
     """Render a latent vector interpolation video.
+
     Examples:
+
     \b
     # Render a 4x2 grid of interpolations for seeds 0 through 31.
     python gen_video.py --output=lerp.mp4 --trunc=1 --seeds=0-31 --grid=4x2 \\
         --network=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-afhqv2-512x512.pkl
+
     Animation length and seed keyframes:
+
     The animation length is either determined based on the --seeds value or explicitly
     specified using the --num-keyframes option.
+
     When num keyframes is specified with --num-keyframes, the output video length
     will be 'num_keyframes*w_frames' frames.
+
     If --num-keyframes is not specified, the number of seeds given with
     --seeds must be divisible by grid size W*H (--grid).  In this case the
     output video length will be '# seeds/(w*h)*w_frames' frames.
@@ -156,7 +247,8 @@ def generate_images(
 
     gen_interp_video(G=G, mp4=output, bitrate='12M', grid_dims=grid, num_keyframes=num_keyframes, w_frames=w_frames, seeds=seeds, shuffle_seed=shuffle_seed, psi=truncation_psi)
 
+
 #----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    generate_images() # pylint: disable=no-value-for-parameter
+    generate_images()
