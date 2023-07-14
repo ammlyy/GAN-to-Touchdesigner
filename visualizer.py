@@ -24,7 +24,6 @@ from viz import stylemix_widget
 from viz import trunc_noise_widget
 from viz import performance_widget
 from viz import capture_widget
-from viz import layer_widget
 from viz import equivariance_widget
 
 #----------------------------------------------------------------------------
@@ -53,12 +52,6 @@ class Visualizer(imgui_window.ImguiWindow):
         self.stylemix_widget    = stylemix_widget.StyleMixingWidget(self)
         self.trunc_noise_widget = trunc_noise_widget.TruncationNoiseWidget(self)
         self.perf_widget        = performance_widget.PerformanceWidget(self)
-        self.capture_widget     = capture_widget.CaptureWidget(self)
-        self.layer_widget       = layer_widget.LayerWidget(self)
-        self.eq_widget          = equivariance_widget.EquivarianceWidget(self)
-
-        if capture_dir is not None:
-            self.capture_widget.path = capture_dir
 
         # Initialize window.
         self.set_position(0, 0)
@@ -128,12 +121,6 @@ class Visualizer(imgui_window.ImguiWindow):
         self.trunc_noise_widget(expanded)
         expanded, _visible = imgui_utils.collapsing_header('Performance & capture', default=True)
         self.perf_widget(expanded)
-        self.capture_widget(expanded)
-        expanded, _visible = imgui_utils.collapsing_header('Layers & channels', default=True)
-        self.layer_widget(expanded)
-        with imgui_utils.grayed_out(not self.result.get('has_input_transform', False)):
-            expanded, _visible = imgui_utils.collapsing_header('Equivariance', default=True)
-            self.eq_widget(expanded)
 
         # Render.
         if self.is_skipping_frames():
@@ -288,33 +275,8 @@ def main(
         viz.load_pickle(pkls[0])
     else:
         pretrained = [
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-afhqv2-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-ffhq-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-ffhqu-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-ffhqu-256x256.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-metfaces-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-metfacesu-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-afhqv2-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-ffhq-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-ffhqu-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-ffhqu-256x256.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-metfaces-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-t-metfacesu-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-afhqcat-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-afhqdog-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-afhqv2-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-afhqwild-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-brecahad-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-celebahq-256x256.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-cifar10-32x32.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-256x256.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhq-512x512.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhqu-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-ffhqu-256x256.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-lsundog-256x256.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-metfaces-1024x1024.pkl',
-            'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan2/versions/1/files/stylegan2-metfacesu-1024x1024.pkl'
+            './models/lhq-256-stylegan3-t-25Mimg.pkl',
+            './models/wikiart-1024-stylegan3-t-17.2Mimg.pkl'
         ]
 
         # Populate recent pickles list with pretrained model URLs.

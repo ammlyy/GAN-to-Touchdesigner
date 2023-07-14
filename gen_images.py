@@ -17,26 +17,10 @@ import dnnlib
 import numpy as np
 import PIL.Image
 import torch
-import random
 
 import legacy
 
 #----------------------------------------------------------------------------
-
-#----------------------------------------------------------------------------
-import sys
-sys.path.append('Library')
-
-import numpy as np
-import argparse
-import time
-import SpoutSDK
-import pygame
-from pygame.locals import *
-from OpenGL.GL import *
-from OpenGL.GL.framebufferobjects import *
-from OpenGL.GLU import *
-
 
 def parse_range(s: Union[str, List]) -> List[int]:
     '''Parse a comma separated list of numbers or ranges and return a list of ints.
@@ -83,11 +67,6 @@ def make_transform(translate: Tuple[float,float], angle: float):
     return m
 
 #----------------------------------------------------------------------------
-def main_pipeline(data):
-    
-    output = data
-    
-    return output
 
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
@@ -130,44 +109,21 @@ def generate_images(
 
     os.makedirs(outdir, exist_ok=True)
 
-    width = 1024
-    height = 1024
-    display = (width,height)
-    
-    senderName = 'GAN out'
-    silent = False
-    
-    # window setup
-    pygame.init() 
-    pygame.display.set_caption(senderName)
-    pygame.display.set_mode(display, DOUBLEBUF|OPENGL)
+    # Labels.
+    label = torch.zeros([1, G.c_dim], device=device)
+    if G.c_dim != 0:
+        if class_idx is None:
+            raise click.ClickException('Must specify class label with --class when using a conditional network')
+        label[:, class_idx] = 1
+    else:
+        if class_idx is not None:
+            print ('warn: --class=lbl ignored when running on an unconditional network')
 
-    # init spout sender
-    spoutSender = SpoutSDK.SpoutSender()
-    spoutSenderWidth = width
-    spoutSenderHeight = height
-    # Its signature in c++ looks like this: bool CreateSender(const char *Sendername, unsigned int width, unsigned int height, DWORD dwFormat = 0);
-    spoutSender.CreateSender(senderName, spoutSenderWidth, spoutSenderHeight, 0)
-    # create textures for spout receiver and spout sender 
-    textureSendID = glGenTextures(1)
+    # Generate images.
+    for seed_idx, seed in enumerate(seeds):
+        print('Generating image for seed %d (%d/%d) ...' % (seed, seed_idx, len(seeds)))
+        z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim)).to(device)
 
-    seeds = random.randrange(0, 200)
-    rnd = np.random.RandomState(seeds)
-
-    # loop for graph frame by frame
-    while(True):
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                spoutReceiver.ReleaseReceiver()
-                pygame.quit()
-                quit()
-
-
-
-        # Generate images.
-        z = torch.from_numpy(rnd.randn(1, G.z_dim)).to(device)
-        z += 0.01
-        label = torch.zeros([1, G.c_dim], device=device)
         # Construct an inverse rotation/translation matrix and pass to the generator.  The
         # generator expects this matrix as an inverse to avoid potentially failing numerical
         # operations in the network.
@@ -178,49 +134,7 @@ def generate_images(
 
         img = G(z, label, truncation_psi=truncation_psi, noise_mode=noise_mode)
         img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)
-        #PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save(f'{outdir}/seed{seed:04d}.png')
-        output = main_pipeline(img[0].cpu().numpy())
-
-    # setup the texture so we can load the output into it
-        glBindTexture(GL_TEXTURE_2D, textureSendID);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-        # copy output into texture
-        glTexImage2D( GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, output )
-            
-        # setup window to draw to screen
-        glActiveTexture(GL_TEXTURE0)
-        # clean start
-        glClear(GL_COLOR_BUFFER_BIT  | GL_DEPTH_BUFFER_BIT )
-        # reset drawing perspective
-        glLoadIdentity()
-        # draw texture on screen
-        glBegin(GL_QUADS)
-
-        glTexCoord(0,0)        
-        glVertex2f(0,0)
-
-        glTexCoord(1,0)
-        glVertex2f(width,0)
-
-        glTexCoord(1,1)
-        glVertex2f(width,height)
-
-        glTexCoord(0,1)
-        glVertex2f(0,height)
-
-        glEnd()
-        
-        if silent:
-            pygame.display.iconify()
-                
-        # update window
-        pygame.display.flip()        
-
-        spoutSender.SendTexture(textureSendID.item(), GL_TEXTURE_2D, spoutSenderWidth, spoutSenderHeight, False, 0)
-
+        PIL.Image.fromarray(img[0].cpu().numpy(), 'RGB').save(f'{outdir}/seed{seed:04d}.png')
 
 
 #----------------------------------------------------------------------------

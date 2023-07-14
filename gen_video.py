@@ -1,3 +1,11 @@
+# Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# NVIDIA CORPORATION and its licensors retain all intellectual property
+# and proprietary rights in and to this software, related documentation
+# and any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
+
 """Generate lerp videos using pretrained network pickle."""
 
 import copy
@@ -85,6 +93,7 @@ def gen_interp_video(G, mp4: str, seeds, shuffle_seed=None, w_frames=60*4, kind=
 
 def parse_range(s: Union[str, List[int]]) -> List[int]:
     '''Parse a comma separated list of numbers or ranges and return a list of ints.
+
     Example: '1,2,5-10' returns [1, 2, 5, 6, 7]
     '''
     if isinstance(s, list): return s
@@ -102,6 +111,7 @@ def parse_range(s: Union[str, List[int]]) -> List[int]:
 
 def parse_tuple(s: Union[str, Tuple[int,int]]) -> Tuple[int, int]:
     '''Parse a 'M,N' or 'MxN' integer tuple.
+
     Example:
         '4x2' returns (4,2)
         '0,1' returns (0,1)
@@ -117,7 +127,7 @@ def parse_tuple(s: Union[str, Tuple[int,int]]) -> Tuple[int, int]:
 @click.command()
 @click.option('--network', 'network_pkl', help='Network pickle filename', required=True)
 @click.option('--seeds', type=parse_range, help='List of random seeds', required=True)
-@click.option('--shuffle-seed', type=int, help='Random seed to use for shuffling seed order', default=42)
+@click.option('--shuffle-seed', type=int, help='Random seed to use for shuffling seed order', default=None)
 @click.option('--grid', type=parse_tuple, help='Grid width/height, e.g. \'4x3\' (default: 1x1)', default=(1,1))
 @click.option('--num-keyframes', type=int, help='Number of seeds to interpolate through.  If not specified, determine based on the length of the seeds array given by --seeds.', default=None)
 @click.option('--w-frames', type=int, help='Number of frames to interpolate between latents', default=120)
@@ -134,16 +144,22 @@ def generate_images(
     output: str
 ):
     """Render a latent vector interpolation video.
+
     Examples:
+
     \b
     # Render a 4x2 grid of interpolations for seeds 0 through 31.
     python gen_video.py --output=lerp.mp4 --trunc=1 --seeds=0-31 --grid=4x2 \\
         --network=https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/stylegan3-r-afhqv2-512x512.pkl
+
     Animation length and seed keyframes:
+
     The animation length is either determined based on the --seeds value or explicitly
     specified using the --num-keyframes option.
+
     When num keyframes is specified with --num-keyframes, the output video length
     will be 'num_keyframes*w_frames' frames.
+
     If --num-keyframes is not specified, the number of seeds given with
     --seeds must be divisible by grid size W*H (--grid).  In this case the
     output video length will be '# seeds/(w*h)*w_frames' frames.
@@ -160,3 +176,5 @@ def generate_images(
 
 if __name__ == "__main__":
     generate_images() # pylint: disable=no-value-for-parameter
+
+#----------------------------------------------------------------------------
